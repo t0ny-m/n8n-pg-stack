@@ -525,8 +525,8 @@ select_services_interactive() {
     
     # Build checklist
     local options=(
-        "n8n" "n8n workflow automation" OFF
-        "supabase" "Supabase (full stack)" OFF
+        "n8n" "n8n" OFF
+        "supabase" "Supabase" OFF
         "npm" "Nginx Proxy Manager" OFF
         "cloudflared" "Cloudflared Tunnel" OFF
         "portainer" "Portainer" OFF
@@ -597,7 +597,7 @@ select_services_simple() {
     fi
     
     START_SUPABASE=false
-    read -rp "Start Supabase (full stack)? [y/N]: " response
+    read -rp "Start Supabase? [y/N]: " response
     if [[ "$response" =~ ^[Yy]$ ]]; then
         START_SUPABASE=true
     fi
@@ -651,8 +651,8 @@ main() {
     print_header "Selected Services"
     echo "The following services will be started:"
     echo ""
-    $START_N8N && echo "  • n8n (+ independent Postgres: n8n-db)"
-    $START_SUPABASE && echo "  • Supabase (full stack)"
+    $START_N8N && echo "  • n8n (+ Postgres)"
+    $START_SUPABASE && echo "  • Supabase"
     $START_NPM && echo "  • Nginx Proxy Manager"
     $START_CLOUDFLARED && echo "  • Cloudflared Tunnel"
     $START_PORTAINER && echo "  • Portainer"
@@ -718,7 +718,7 @@ main() {
     
     if $START_SUPABASE; then
         # Full Supabase stack - Staggered startup
-        print_header "Starting: Supabase (full stack - staggered)"
+        print_header "Starting: Supabase"
         
         if check_dir "$SUPABASE_DIR"; then
             cd "$SUPABASE_DIR"
