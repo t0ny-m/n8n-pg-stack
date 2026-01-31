@@ -67,8 +67,8 @@ Make sure WSL2 backend is enabled.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/t0ny-m/n8n-stack.git
-cd n8n-stack
+git clone https://github.com/t0ny-m/n8n-pg-stack.git
+cd n8n-pg-stack
 ```
 
 ### 2. Setup environment files
@@ -94,11 +94,11 @@ Edit `n8n/.env` and set:
 #### Supabase configuration
 
 ```bash
-cd supabase/docker
+cd supabase
 nano .env  # or use your preferred editor
 ```
 
-Edit `supabase/docker/.env` and set:
+Edit `supabase/.env` and set:
 **Required settings:**
 - `POSTGRES_PASSWORD` - generate with: `openssl rand -hex 32`
 - `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY` - generate following: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
@@ -134,14 +134,7 @@ Set `CLOUDFLARE_TUNNEL_TOKEN` from Cloudflare Zero Trust Dashboard.
 ### 3. Start the stack
 
 ```bash
-cd n8n-stack # cd ../.. to back to n8n-stack root from n8n-stack/proxy/cloudflared
-chmod +x start-stack.sh
-./start-stack.sh
-```
-
-Or from scripts directory:
-```bash
-cd n8n-stack/scripts/manage
+cd n8n-pg-stack  # Go to project root
 chmod +x start-stack.sh
 ./start-stack.sh
 ```
@@ -200,7 +193,7 @@ Interactive menu will let you choose which services to start.
 cd n8n && docker compose down
 
 # Stop Supabase
-cd supabase/docker && docker compose down
+cd supabase && docker compose down
 
 # Stop NPM
 cd proxy/npm && docker compose down
@@ -234,7 +227,7 @@ docker compose pull
 docker compose up -d
 
 # Same for other services
-cd ../supabase/docker
+cd ../supabase
 docker compose pull
 docker compose up -d
 ```
@@ -262,7 +255,7 @@ docker exec supabase-db pg_dump -U postgres postgres > backups/supabase/backup-$
 
 ```bash
 # Create backup
-docker exec n8n-db pg_dump -U postgres_user n8n > backups/n8n/n8n-db-$(date +%Y%m%d).sql
+docker exec n8n-db pg_dump -U postgres n8n_db > backups/n8n/n8n-db-$(date +%Y%m%d).sql
 ```
 
 ### Restore database
@@ -272,7 +265,7 @@ docker exec n8n-db pg_dump -U postgres_user n8n > backups/n8n/n8n-db-$(date +%Y%
 docker exec -i supabase-db psql -U postgres postgres < backups/supabase/backup-20260124.sql
 
 # Restore n8n database
-docker exec -i n8n-db psql -U postgres_user -d n8n < backups/n8n/n8n-db-20260124.sql
+docker exec -i n8n-db psql -U postgres -d n8n_db < backups/n8n/n8n-db-20260124.sql
 ```
 
 ## Troubleshooting
@@ -297,9 +290,10 @@ If ports 5678, 8000, 80, 443, or 81 are already in use, edit the respective `doc
 ### n8n can't connect to database
 
 Make sure:
-1. Supabase is running: `docker ps | grep supabase-db`
-2. Database is healthy: `docker inspect supabase-db --format='{{.State.Health.Status}}'`
-3. Passwords in `n8n/.env` and `supabase/docker/.env` match
+1. n8n-db is running: `docker ps | grep n8n-db`
+2. Database is healthy: `docker inspect n8n-db --format='{{.State.Health.Status}}'`
+3. Check `n8n/.env` has correct database credentials (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB)
+4. Database volume exists: `docker volume ls | grep db_storage`
 
 ### Network issues
 
@@ -319,7 +313,7 @@ docker logs <container-name> --tail 100
 - Missing or incorrect `.env` configuration
 - Port already in use
 - Insufficient memory (increase Docker memory limit)
-- Database not ready (n8n waiting for Supabase)
+- Database not ready (n8n waiting for n8n-db)
 
 ### Out of memory (t3.micro/small instances)
 
@@ -350,18 +344,26 @@ deploy:
 ## Architecture
 
 ```
-      ┌───────────┴───────────┐
-      │                       │
- ┌────┴─────┐           ┌─────┴──────┐
- │   n8n    │ :5678     │  Supabase  │ :8000
- │          │           │            │ :3000
- │ ┌──────┐ │           │ ┌────────┐ │
- │ │n8n-db│◀┼────────── │ │   DB   │ │
- │ └──────┘ │           │ └────────┘ │
- └──────────┘           └────────────┘
-           │
-           └─────────────────┐
-               n8n-stack-network
+                    Internet
+                        │
+          ┌─────────────┴─────────────┐
+          │    NPM/Cloudflare Tunnel  │ (optional)
+          │         :80/:443          │
+          └─────────────┬─────────────┘
+                        │
+    ┌───────────────────┼───────────────────┐
+    │                   │                   │
+┌───┴───┐          ┌────┴────┐         ┌────┴────┐
+│  n8n  │ :5678    │Supabase │ :8000   │Portainer│
+│       │          │(optional)│         │(optional)│
+│┌─────┐│          │┌───────┐│         └─────────┘
+││n8n- ││          ││  DB   ││
+││db   ││          ││PG:15  ││
+│└─────┘│          │└───────┘│
+└───────┘          └─────────┘
+INDEPENDENT         INDEPENDENT
+
+        All on: n8n-stack-network
 ```
 
 ### Component Relationships
@@ -375,35 +377,39 @@ deploy:
 ## Project Structure
 
 ```
-n8n-stack/
+n8n-pg-stack/
 ├── start-stack.sh              # Main startup script
 ├── README.md
-├── MIGRATION_GUIDE.md          # Migration from Supabase to n8n-PG
 ├── n8n/
 │   ├── docker-compose.yml
 │   ├── .env.example
-│   ├── .env                    # Create from .env.example
+│   ├── init-data.sh            # DB initialization
 │   ├── files/
 │   └── backup/
-├── supabase/
+├── supabase/                   # Optional Supabase stack
 │   ├── docker-compose.yml
 │   ├── .env.example
-│   ├── .env                # Create from .env.example
-│   └── volumes/
+│   └── README.md               # See for full structure
 ├── proxy/
 │   ├── npm/
-│   │   ├── letsencrypt/
 │   │   ├── docker-compose.yml
 │   │   └── .env.example
 │   └── cloudflared/
 │       ├── docker-compose.yml
-│       ├── .env.example
-│       └── .env                # Create from .env.example
-├── portainer/                  # Optional
-│   └── docker-compose.yml
-└── scripts/
-    └── manage/
-        └── start-stack.sh      # Symlink to root script
+│       └── .env.example
+├── portainer/
+│   ├── docker-compose.yml
+│   └── .env.example
+├── scripts/
+│   ├── backup/
+│   │   └── backup-stack.sh     # Backup script
+│   ├── restore/
+│   │   └── restore-stack.sh    # Restore script
+│   └── manage/
+│       └── supabase-toggle.sh  # Switch Supabase modes
+└── docs/
+    ├── BACKUP_INSTRUCTIONS.md
+    └── RESTORE_INSTRUCTIONS.md
 ```
 
 ## Resources

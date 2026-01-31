@@ -351,7 +351,7 @@ restore_n8n_db_dump() {
             while [ $retries -gt 0 ]; do
                 # Load env for user check
                 source .env 2>/dev/null || true
-                local db_user=${POSTGRES_USER:-postgres_user}
+                local db_user=${POSTGRES_USER:-postgres}
                 
                 if docker exec "$db_container" pg_isready -U "$db_user" >/dev/null 2>&1; then
                     echo " OK"
@@ -378,7 +378,7 @@ restore_n8n_db_dump() {
     print_info "Restoring n8n database from dump..."
     
     source "$N8N_DIR/.env" 2>/dev/null || true
-    local db_user=${POSTGRES_USER:-postgres_user}
+    local db_user=${POSTGRES_USER:-postgres}
     local db_name=${POSTGRES_DB:-n8n}
     
     # Drop and create DB (WARNING: destructive)

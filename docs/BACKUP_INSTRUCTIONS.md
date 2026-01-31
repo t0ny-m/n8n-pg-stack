@@ -7,7 +7,7 @@ This guide explains how to back up your n8n-stack and migrate it to a new instan
 The easiest way to backup is using the included script.
 
 ```bash
-./scripts/manage/backup-stack.sh
+./scripts/backup/backup-stack.sh
 ```
 
 - Select the services you want to backup.
@@ -25,7 +25,7 @@ If you prefer to backup manually, here is what you need to save for each service
 - **Directories**: `files/`
 - **Data Volume**: `n8n_data` (Named Volume)
   - To backup: `docker run --rm -v n8n_data:/volume -v $(pwd):/backup alpine tar -czf /backup/n8n_data.tar.gz -C /volume .`
-- **Logical Backup**: The script automatically tries to create `n8n_schema_dump.sql` by running `pg_dump` against the `supabase-db` container before stopping services.
+- **Logical Backup**: The script automatically creates `n8n_db_dump.sql` by running `pg_dump` against the `n8n-db` container before stopping services.
 
 ### Supabase
 - **Location**: `supabase/`
@@ -56,8 +56,8 @@ Follow these steps to move your stack to a new server.
 1. Install Docker and Docker Compose.
 2. Clone this repository to the new server.
    ```bash
-   git clone <your-repo-url> n8n-stack
-   cd n8n-stack
+   git clone https://github.com/t0ny-m/n8n-pg-stack.git
+   cd n8n-pg-stack
    ```
 
 ### Step 2: Transfer Backup

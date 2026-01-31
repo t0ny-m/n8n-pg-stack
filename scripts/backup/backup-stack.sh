@@ -72,6 +72,10 @@ print_info() {
     echo -e "${YELLOW}ℹ${NC} $1"
 }
 
+print_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
 check_dependencies() {
     if ! command -v docker &>/dev/null; then
         print_error "Docker is not installed or not in PATH"
@@ -183,7 +187,7 @@ backup_named_volume() {
     
     # Check if volume exists
     if ! docker volume inspect "$volume_name" &>/dev/null; then
-        print_error "Volume $volume_name does not exist, jumping..."
+        print_error "Volume $volume_name does not exist, skipping..."
         echo "Volume $volume_name skipped" > "$dest_file.skipped"
         return 0
     fi
@@ -413,7 +417,7 @@ main() {
                         
                         # Load env to get credentials check
                         source "$N8N_DIR/.env" 2>/dev/null || true
-                        local db_user=${POSTGRES_USER:-postgres_user}
+                        local db_user=${POSTGRES_USER:-postgres}
                         local db_name=${POSTGRES_DB:-n8n}
                         
                         if docker exec n8n-db pg_dump -U "$db_user" -d "$db_name" > "$search_path_dump" 2>/dev/null; then
