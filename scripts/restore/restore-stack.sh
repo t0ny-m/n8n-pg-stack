@@ -194,6 +194,7 @@ find_backups() {
         [ -n "$LATEST_CLOUDFLARED_BACKUP" ] && echo "  - Cloudflared: $(basename "$LATEST_CLOUDFLARED_BACKUP")"
         [ -n "$LATEST_PORTAINER_BACKUP" ] && echo "  - Portainer: $(basename "$LATEST_PORTAINER_BACKUP")"
     fi
+    return 0
 }
 
 # ============================================================================
@@ -211,31 +212,31 @@ select_services() {
     # Helper to check availability
     is_available() {
         if [ "$SOURCE_TYPE" = "archive" ]; then return 0; fi # Assume archive has everything or we can't easily peek without extracting
-        [ -n "$1" ]
+        if [ -n "$1" ]; then return 0; else return 1; fi
     }
     
     if is_available "$LATEST_N8N_BACKUP"; then
-        options+=("n8n" "Restore n8n" OFF)
+        options+=("n8n" "n8n" OFF)
         available_count=$((available_count+1))
     fi
     
     if is_available "$LATEST_SUPABASE_BACKUP"; then
-        options+=("supabase" "Restore Supabase" OFF)
+        options+=("supabase" "Supabase" OFF)
         available_count=$((available_count+1))
     fi
     
     if is_available "$LATEST_NPM_BACKUP"; then
-        options+=("npm" "Restore NPM" OFF)
+        options+=("npm" "Nginx Proxy Manager" OFF)
         available_count=$((available_count+1))
     fi
     
     if is_available "$LATEST_CLOUDFLARED_BACKUP"; then
-        options+=("cloudflared" "Restore Cloudflared" OFF)
+        options+=("cloudflared" "Cloudflared Tunnel" OFF)
         available_count=$((available_count+1))
     fi
     
     if is_available "$LATEST_PORTAINER_BACKUP"; then
-        options+=("portainer" "Restore Portainer" OFF)
+        options+=("portainer" "Portainer" OFF)
         available_count=$((available_count+1))
     fi
     
@@ -262,6 +263,12 @@ select_services() {
         if is_available "$LATEST_PORTAINER_BACKUP"; then read -p "Restore Portainer? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected portainer"; fi
     fi
     
+    if [ $? -ne 0 ] && [ -n "$cmd" ]; then
+        echo ""
+        print_error "Operation cancelled by user"
+        exit 0
+    fi
+    
     if [ -z "$selected" ]; then
         print_error "No services selected."
         exit 0
@@ -276,6 +283,7 @@ select_services() {
             \"portainer\"|portainer) RESTORE_PORTAINER=true ;;
         esac
     done
+    return 0
 }
 
 # ============================================================================

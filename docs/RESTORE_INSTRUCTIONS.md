@@ -19,7 +19,7 @@ The stack includes a restore script that simplifies the process by automatically
 2. Run the restore script:
 
 ```bash
-./scripts/restore/restore-stack.sh
+sudo ./scripts/restore/restore-stack.sh
 ```
 
 ### How it Works

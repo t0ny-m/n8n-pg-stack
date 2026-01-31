@@ -7,7 +7,7 @@ This guide explains how to back up your n8n-stack and migrate it to a new instan
 The easiest way to backup is using the included script.
 
 ```bash
-./scripts/backup/backup-stack.sh
+sudo ./scripts/backup/backup-stack.sh
 ```
 
 - Select the services you want to backup.

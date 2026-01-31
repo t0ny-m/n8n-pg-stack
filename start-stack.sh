@@ -619,6 +619,7 @@ select_services_simple() {
     if [[ "$response" =~ ^[Yy]$ ]]; then
         START_PORTAINER=true
     fi
+    return 0
 }
 
 

@@ -104,11 +104,11 @@ select_services_interactive() {
     fi
     
     local options=(
-        "n8n" "n8n workflow automation (env, files, volume)" OFF
-        "supabase" "Supabase (env, db data, storage)" OFF
-        "npm" "Nginx Proxy Manager (data, certs)" OFF
-        "cloudflared" "Cloudflared Tunnel (env)" OFF
-        "portainer" "Portainer (volume)" OFF
+        "n8n" "n8n" OFF
+        "supabase" "Supabase" OFF
+        "npm" "Nginx Proxy Manager" OFF
+        "cloudflared" "Cloudflared Tunnel" OFF
+        "portainer" "Portainer" OFF
     )
     
     local selected
@@ -172,6 +172,7 @@ select_services_simple() {
     BACKUP_PORTAINER=false
     read -rp "Backup Portainer? [y/N]: " response
     if [[ "$response" =~ ^[Yy]$ ]]; then BACKUP_PORTAINER=true; fi
+    return 0
 }
 
 # ============================================================================
