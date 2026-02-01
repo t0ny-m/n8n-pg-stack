@@ -400,8 +400,8 @@ main() {
         if $BACKUP_N8N; then
             if [ -d "$N8N_DIR" ]; then
                 print_info "Checking n8n state..."
-                # Check if n8n is running
-                if docker compose -f "$N8N_DIR/docker-compose.yml" ps --services --filter "status=running" | grep -q "n8n"; then
+                # Check if n8n container is running
+                if docker ps --filter "name=^n8n$" --filter "status=running" --format "{{.Names}}" | grep -q "n8n"; then
                     N8N_RUNNING="true"
                     
                     # LOGICAL BACKUP (pg_dump) needs running DB
@@ -437,30 +437,22 @@ main() {
         fi
         
         # 2. Supabase
-        # We handle Supabase if it's selected OR if n8n is selected (dependency)
-        if $BACKUP_SUPABASE || $BACKUP_N8N; then
+        if $BACKUP_SUPABASE; then
             if [ -d "$SUPABASE_DIR" ]; then
                 print_info "Checking Supabase state..."
-                # Get list of running services
-                cd "$SUPABASE_DIR"
-                SUPABASE_RUNNING=$(docker compose ps --services --filter "status=running")
+                # Get list of running services using docker ps to avoid .env parsing issues
+                SUPABASE_RUNNING=$(docker ps --filter "label=com.docker.compose.project=supabase" --filter "status=running" --format '{{.Label "com.docker.compose.service"}}')
                 
                 if [ -n "$SUPABASE_RUNNING" ]; then
-                    if $BACKUP_SUPABASE; then
-                        print_info "Stopping Supabase (Backup selected)..."
-                    else
-                        print_info "Stopping Supabase (Dependency for n8n)..."
-                    fi
+                    print_info "Stopping Supabase (Backup selected)..."
                     docker compose down 2>/dev/null || true
                 fi
             fi
         fi
         
-        # 3. NPM
         if $BACKUP_NPM; then
             if [ -d "$NPM_DIR" ]; then
-                cd "$NPM_DIR"
-                if docker compose ps --services --filter "status=running" | grep -q "npm"; then
+                if docker ps --filter "name=^npm$" --filter "status=running" --format "{{.Names}}" | grep -q "npm"; then
                     NPM_RUNNING="true"
                     print_info "Stopping NPM..."
                     docker compose down 2>/dev/null || true
@@ -468,11 +460,9 @@ main() {
             fi
         fi
         
-        # 4. Cloudflared
         if $BACKUP_CLOUDFLARED; then
              if [ -d "$CLOUDFLARED_DIR" ]; then
-                cd "$CLOUDFLARED_DIR"
-                if docker compose ps --services --filter "status=running" | grep -q "cloudflared"; then
+                if docker ps --filter "name=^cloudflared-tunnel$" --filter "status=running" --format "{{.Names}}" | grep -q "cloudflared-tunnel"; then
                     CLOUDFLARED_RUNNING="true"
                     print_info "Stopping Cloudflared..."
                     docker compose down 2>/dev/null || true
@@ -480,12 +470,10 @@ main() {
             fi
         fi
         
-        # 5. Portainer
         if $BACKUP_PORTAINER; then
              if [ -d "$PORTAINER_DIR" ]; then
                  print_info "Checking Portainer state..."
-                 cd "$PORTAINER_DIR"
-                 if docker compose ps --services --filter "status=running" | grep -q "portainer"; then
+                 if docker ps --filter "name=^portainer$" --filter "status=running" --format "{{.Names}}" | grep -q "portainer"; then
                      PORTAINER_RUNNING="true"
                      print_info "Stopping Portainer..."
                      docker compose down 2>/dev/null || true
