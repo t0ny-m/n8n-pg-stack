@@ -40,14 +40,12 @@ TEMP_RESTORE_DIR="$PROJECT_ROOT/temp_restore_$(date +%s)"
 
 # Service Paths
 N8N_DIR="$PROJECT_ROOT/n8n"
-SUPABASE_DIR="$PROJECT_ROOT/supabase"
 NPM_DIR="$PROJECT_ROOT/proxy/npm"
 CLOUDFLARED_DIR="$PROJECT_ROOT/proxy/cloudflared"
 PORTAINER_DIR="$PROJECT_ROOT/portainer"
 
 # State variables
 RESTORE_N8N=false
-RESTORE_SUPABASE=false
 RESTORE_NPM=false
 RESTORE_CLOUDFLARED=false
 RESTORE_PORTAINER=false
@@ -56,7 +54,6 @@ RESTORE_PORTAINER=false
 SOURCE_TYPE="" # "archive" or "folders"
 SELECTED_ARCHIVE=""
 LATEST_N8N_BACKUP=""
-LATEST_SUPABASE_BACKUP=""
 LATEST_NPM_BACKUP=""
 LATEST_CLOUDFLARED_BACKUP=""
 LATEST_PORTAINER_BACKUP=""
@@ -127,7 +124,6 @@ find_backups() {
     
     # 2. Check for individual service backups
     LATEST_N8N_BACKUP=$(find_latest_backup_in_dir "n8n")
-    LATEST_SUPABASE_BACKUP=$(find_latest_backup_in_dir "supabase")
     LATEST_NPM_BACKUP=$(find_latest_backup_in_dir "npm")
     LATEST_CLOUDFLARED_BACKUP=$(find_latest_backup_in_dir "cloudflared")
     LATEST_PORTAINER_BACKUP=$(find_latest_backup_in_dir "portainer")
@@ -152,7 +148,7 @@ find_backups() {
 
     # Check if we have any individual folder backups
     local has_folders=false
-    if [ -n "$LATEST_N8N_BACKUP" ] || [ -n "$LATEST_SUPABASE_BACKUP" ] || [ -n "$LATEST_NPM_BACKUP" ] || [ -n "$LATEST_CLOUDFLARED_BACKUP" ] || [ -n "$LATEST_PORTAINER_BACKUP" ]; then
+    if [ -n "$LATEST_N8N_BACKUP" ] || [ -n "$LATEST_NPM_BACKUP" ] || [ -n "$LATEST_CLOUDFLARED_BACKUP" ] || [ -n "$LATEST_PORTAINER_BACKUP" ]; then
         has_folders=true
     fi
     
@@ -173,7 +169,7 @@ find_backups() {
     # Let's compare archive timestamp vs max folder timestamp
     local max_folder_ts=0
     
-    for backup in "$LATEST_N8N_BACKUP" "$LATEST_SUPABASE_BACKUP" "$LATEST_NPM_BACKUP" "$LATEST_CLOUDFLARED_BACKUP" "$LATEST_PORTAINER_BACKUP"; do
+    for backup in "$LATEST_N8N_BACKUP" "$LATEST_NPM_BACKUP" "$LATEST_CLOUDFLARED_BACKUP" "$LATEST_PORTAINER_BACKUP"; do
         if [ -n "$backup" ]; then
              local ts=0
              if date --version &>/dev/null; then ts=$(stat -c %Y "$backup"); else ts=$(stat -f %m "$backup"); fi
@@ -189,7 +185,6 @@ find_backups() {
         SOURCE_TYPE="folders"
         print_info "Using most recent source: Individual Backup Folders"
         [ -n "$LATEST_N8N_BACKUP" ] && echo "  - n8n: $(basename "$LATEST_N8N_BACKUP")"
-        [ -n "$LATEST_SUPABASE_BACKUP" ] && echo "  - Supabase: $(basename "$LATEST_SUPABASE_BACKUP")"
         [ -n "$LATEST_NPM_BACKUP" ] && echo "  - NPM: $(basename "$LATEST_NPM_BACKUP")"
         [ -n "$LATEST_CLOUDFLARED_BACKUP" ] && echo "  - Cloudflared: $(basename "$LATEST_CLOUDFLARED_BACKUP")"
         [ -n "$LATEST_PORTAINER_BACKUP" ] && echo "  - Portainer: $(basename "$LATEST_PORTAINER_BACKUP")"
@@ -217,11 +212,6 @@ select_services() {
     
     if is_available "$LATEST_N8N_BACKUP"; then
         options+=("n8n" "n8n" OFF)
-        available_count=$((available_count+1))
-    fi
-    
-    if is_available "$LATEST_SUPABASE_BACKUP"; then
-        options+=("supabase" "Supabase" OFF)
         available_count=$((available_count+1))
     fi
     
@@ -257,7 +247,6 @@ select_services() {
         print_info "Interactive menu missing. Please select manually."
         selected=""
         if is_available "$LATEST_N8N_BACKUP"; then read -p "Restore n8n? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected n8n"; fi
-        if is_available "$LATEST_SUPABASE_BACKUP"; then read -p "Restore Supabase? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected supabase"; fi
         if is_available "$LATEST_NPM_BACKUP"; then read -p "Restore NPM? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected npm"; fi
         if is_available "$LATEST_CLOUDFLARED_BACKUP"; then read -p "Restore Cloudflared? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected cloudflared"; fi
         if is_available "$LATEST_PORTAINER_BACKUP"; then read -p "Restore Portainer? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected portainer"; fi
@@ -277,7 +266,6 @@ select_services() {
     for service in $selected; do
         case $service in
             \"n8n\"|n8n) RESTORE_N8N=true ;;
-            \"supabase\"|supabase) RESTORE_SUPABASE=true ;;
             \"npm\"|npm) RESTORE_NPM=true ;;
             \"cloudflared\"|cloudflared) RESTORE_CLOUDFLARED=true ;;
             \"portainer\"|portainer) RESTORE_PORTAINER=true ;;
@@ -299,25 +287,13 @@ stop_services() {
     
     local services_to_stop=""
     if $RESTORE_N8N; then services_to_stop="$services_to_stop n8n"; fi
-    if $RESTORE_SUPABASE; then services_to_stop="$services_to_stop supabase"; fi
     if $RESTORE_NPM; then services_to_stop="$services_to_stop npm"; fi
     if $RESTORE_CLOUDFLARED; then services_to_stop="$services_to_stop cloudflared"; fi
     if $RESTORE_PORTAINER; then services_to_stop="$services_to_stop portainer"; fi
     
-    # Check dependencies
-    # n8n depends on supabase (db). If restoring n8n, we might need supabase down if we are restoring db? 
-    # Actually, if we restore n8n volume, we just need n8n down. 
-    # But if we restore Supabase DB, we definitely need Supabase down, and n8n will crash if running.
-    if $RESTORE_SUPABASE && [[ "$services_to_stop" != *"n8n"* ]]; then
-        print_warning "Restoring Supabase will likely disrupt n8n."
-        read -p "Stop n8n as well? [Y/n] " r
-        if [[ ! "$r" =~ ^[Nn] ]]; then services_to_stop="$services_to_stop n8n"; fi
-    fi
-
     # Execute stops
     # Just generic down on directories
     if [[ "$services_to_stop" == *"n8n"* ]];   then cd "$N8N_DIR" && docker compose down; fi
-    if [[ "$services_to_stop" == *"supabase"* ]]; then cd "$SUPABASE_DIR" && docker compose down; fi
     if [[ "$services_to_stop" == *"npm"* ]];   then cd "$NPM_DIR" && docker compose down; fi
     if [[ "$services_to_stop" == *"cloudflared"* ]]; then cd "$CLOUDFLARED_DIR" && docker compose down; fi
     if [[ "$services_to_stop" == *"portainer"* ]]; then cd "$PORTAINER_DIR" && docker compose down; fi
@@ -464,26 +440,6 @@ restore_n8n() {
     fi
 }
 
-restore_supabase() {
-    local src_path="$1"
-    print_header "Restoring Supabase"
-    
-    # Configs
-    print_info "Restoring files..."
-    cp "$src_path/.env" "$SUPABASE_DIR/.env"
-    cp "$src_path/docker-compose.yml" "$SUPABASE_DIR/docker-compose.yml"
-    
-    # Volumes (bind mounts)
-    if [ -d "$src_path/volumes" ]; then
-        print_info "Restoring volumes directory..."
-        # Warning: This overwrites
-        rm -rf "$SUPABASE_DIR/volumes"
-        cp -R "$src_path/volumes" "$SUPABASE_DIR/"
-        print_success "Supabase restored"
-    else
-        print_warning "Volumes backup not found at $src_path/volumes"
-    fi
-}
 
 restore_npm() {
     local src_path="$1"
@@ -590,7 +546,6 @@ main() {
         }
         
         N8N_SRC=$(resolve_temp_path "n8n")
-        SUPABASE_SRC=$(resolve_temp_path "supabase")
         NPM_SRC=$(resolve_temp_path "npm")
         CLOUDFLARED_SRC=$(resolve_temp_path "cloudflared")
         PORTAINER_SRC=$(resolve_temp_path "portainer")
@@ -598,7 +553,6 @@ main() {
     else
         # Direct folders
         N8N_SRC="$LATEST_N8N_BACKUP"
-        SUPABASE_SRC="$LATEST_SUPABASE_BACKUP"
         NPM_SRC="$LATEST_NPM_BACKUP"
         CLOUDFLARED_SRC="$LATEST_CLOUDFLARED_BACKUP"
         PORTAINER_SRC="$LATEST_PORTAINER_BACKUP"
@@ -609,7 +563,6 @@ main() {
     
     # 6. Execute Restore
     if $RESTORE_N8N; then restore_n8n "$N8N_SRC"; fi
-    if $RESTORE_SUPABASE; then restore_supabase "$SUPABASE_SRC"; fi
     if $RESTORE_NPM; then restore_npm "$NPM_SRC"; fi
     if $RESTORE_CLOUDFLARED; then restore_cloudflared "$CLOUDFLARED_SRC"; fi
     if $RESTORE_PORTAINER; then restore_portainer "$PORTAINER_SRC"; fi

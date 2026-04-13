@@ -40,7 +40,6 @@ TIMESTAMP=$(date +"%Y-%m-%d_%H-%M")
 
 # Service Paths
 N8N_DIR="$PROJECT_ROOT/n8n"
-SUPABASE_DIR="$PROJECT_ROOT/supabase"
 NPM_DIR="$PROJECT_ROOT/proxy/npm"
 CLOUDFLARED_DIR="$PROJECT_ROOT/proxy/cloudflared"
 PORTAINER_DIR="$PROJECT_ROOT/portainer"
@@ -105,7 +104,6 @@ select_services_interactive() {
     
     local options=(
         "n8n" "n8n" OFF
-        "supabase" "Supabase" OFF
         "npm" "Nginx Proxy Manager" OFF
         "cloudflared" "Cloudflared Tunnel" OFF
         "portainer" "Portainer" OFF
@@ -132,7 +130,6 @@ select_services_interactive() {
     fi
     
     BACKUP_N8N=false
-    BACKUP_SUPABASE=false
     BACKUP_NPM=false
     BACKUP_CLOUDFLARED=false
     BACKUP_PORTAINER=false
@@ -140,7 +137,6 @@ select_services_interactive() {
     for service in $selected; do
         case $service in
             \"n8n\"|n8n) BACKUP_N8N=true ;;
-            \"supabase\"|supabase) BACKUP_SUPABASE=true ;;
             \"npm\"|npm) BACKUP_NPM=true ;;
             \"cloudflared\"|cloudflared) BACKUP_CLOUDFLARED=true ;;
             \"portainer\"|portainer) BACKUP_PORTAINER=true ;;
@@ -156,10 +152,6 @@ select_services_simple() {
     BACKUP_N8N=false
     read -rp "Backup n8n? [y/N]: " response
     if [[ "$response" =~ ^[Yy]$ ]]; then BACKUP_N8N=true; fi
-    
-    BACKUP_SUPABASE=false
-    read -rp "Backup Supabase? [y/N]: " response
-    if [[ "$response" =~ ^[Yy]$ ]]; then BACKUP_SUPABASE=true; fi
     
     BACKUP_NPM=false
     read -rp "Backup Nginx Proxy Manager? [y/N]: " response
@@ -234,37 +226,6 @@ backup_n8n() {
     fi
 }
 
-backup_supabase() {
-    local folder_name="supabase_backup_${TIMESTAMP}"
-    local service_path="supabase/$folder_name"
-    local full_path="$BACKUPS_DIR/$service_path"
-
-    print_header "Backing up Supabase"
-    mkdir -p "$full_path"
-    
-    if [ -d "$SUPABASE_DIR" ]; then
-        print_info "Copying configuration files..."
-        cp "$SUPABASE_DIR/.env" "$full_path/.env" 2>/dev/null || true
-        cp "$SUPABASE_DIR/docker-compose.yml" "$full_path/docker-compose.yml" 2>/dev/null || true
-        
-        # Volumes (bind mounts)
-        if [ -d "$SUPABASE_DIR/volumes" ]; then
-            print_info "Copying data volumes (this make take a while)..."
-            # We copy the whole volumes directory which contains db, storage, etc.
-            # Using rsync if available for better handling, else cp
-            if command -v rsync &>/dev/null; then
-                rsync -a --exclude 'postgres_data' "$SUPABASE_DIR/volumes" "$full_path/"
-            else
-                cp -R "$SUPABASE_DIR/volumes" "$full_path/"
-            fi
-        fi
-        
-        CREATED_BACKUPS+=("$service_path")
-        print_success "Supabase backup created at: backups/$service_path"
-    else
-        print_error "Supabase directory not found at $SUPABASE_DIR"
-    fi
-}
 
 backup_npm() {
     local folder_name="npm_backup_${TIMESTAMP}"
@@ -372,7 +333,7 @@ main() {
     fi
     
     # Check if anything selected
-    if ! $BACKUP_N8N && ! $BACKUP_SUPABASE && ! $BACKUP_NPM && ! $BACKUP_CLOUDFLARED && ! $BACKUP_PORTAINER; then
+    if ! $BACKUP_N8N && ! $BACKUP_NPM && ! $BACKUP_CLOUDFLARED && ! $BACKUP_PORTAINER; then
         print_error "No services selected for backup. Exiting."
         exit 0
     fi
@@ -387,7 +348,6 @@ main() {
     mkdir -p "$BACKUPS_DIR"
     
     # Capture State & Stop Services
-    SUPABASE_RUNNING=""
     N8N_RUNNING=""
     NPM_RUNNING=""
     CLOUDFLARED_RUNNING=""
@@ -436,20 +396,6 @@ main() {
             fi
         fi
         
-        # 2. Supabase
-        if $BACKUP_SUPABASE; then
-            if [ -d "$SUPABASE_DIR" ]; then
-                print_info "Checking Supabase state..."
-                # Get list of running services using docker ps to avoid .env parsing issues
-                SUPABASE_RUNNING=$(docker ps --filter "label=com.docker.compose.project=supabase" --filter "status=running" --format '{{.Label "com.docker.compose.service"}}')
-                
-                if [ -n "$SUPABASE_RUNNING" ]; then
-                    print_info "Stopping Supabase (Backup selected)..."
-                    docker compose down 2>/dev/null || true
-                fi
-            fi
-        fi
-        
         if $BACKUP_NPM; then
             if [ -d "$NPM_DIR" ]; then
                 if docker ps --filter "name=^npm$" --filter "status=running" --format "{{.Names}}" | grep -q "npm"; then
@@ -487,7 +433,6 @@ main() {
     
     # Perform Backups
     $BACKUP_N8N && backup_n8n
-    $BACKUP_SUPABASE && backup_supabase
     $BACKUP_NPM && backup_npm
     $BACKUP_CLOUDFLARED && backup_cloudflared
     $BACKUP_PORTAINER && backup_portainer
@@ -495,21 +440,6 @@ main() {
     # Restart Services
     if [[ "$stop_response" =~ ^[Yy]$ ]]; then
         print_header "Restarting Services"
-        
-        # 1. Supabase (Priority)
-        if [ -n "$SUPABASE_RUNNING" ]; then
-            print_info "Restarting Supabase services: $(echo "$SUPABASE_RUNNING" | tr '\n' ' ')"
-            cd "$SUPABASE_DIR"
-            # Quote variable to handle newlines if any, though docker compose usually takes args
-            # We convert newlines to spaces for the command
-            SERVICES_TO_START=$(echo "$SUPABASE_RUNNING" | tr '\n' ' ')
-            docker compose up -d $SERVICES_TO_START
-            
-            # Wait for DB if it was running
-            if echo "$SUPABASE_RUNNING" | grep -q "db"; then
-                wait_for_healthy "supabase-db" 60
-            fi
-        fi
         
         # 2. n8n
         if [ "$N8N_RUNNING" = "true" ]; then

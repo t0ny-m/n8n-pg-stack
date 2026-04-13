@@ -5,7 +5,6 @@ Complete self-hosted stack with n8n, Supabase, Nginx Proxy Manager, and Cloudfla
 ## Features
 
 - **n8n** - Workflow automation platform
-- **Supabase** - Open-source Firebase alternative (PostgreSQL, Auth, Storage, Realtime)
 - **Nginx Proxy Manager** - Easy SSL and reverse proxy management (optional)
 - **Cloudflare Tunnel** - Secure tunnel without exposing ports for Local hosted (optional)
 - **Portainer** - Docker container management UI (optional)
@@ -76,7 +75,6 @@ cd n8n-pg-stack
 ```
 cp n8n/.env.example n8n/.env
 cp proxy/cloudflared/.env.example proxy/cloudflared/.env
-cp supabase/.env.example supabase/.env
 ```
 
 #### n8n configuration
@@ -91,24 +89,6 @@ Edit `n8n/.env` and set:
 - `N8N_ENCRYPTION_KEY` - generate with: `openssl rand -hex 16`
 - `DB_POSTGRESDB_PASSWORD` - generate with: `openssl rand -hex 32`
 
-#### Supabase configuration
-
-```bash
-cd supabase
-nano .env  # or use your preferred editor
-```
-
-Edit `supabase/.env` and set:
-**Required settings:**
-- `POSTGRES_PASSWORD` - generate with: `openssl rand -hex 32`
-- `JWT_SECRET`, `ANON_KEY`, `SERVICE_ROLE_KEY` - generate following: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
-- `DASHBOARD_PASSWORD` - you password to supabase dashboard
-- `SECRET_KEY_BASE` - generate with: `openssl rand -hex 32`
-- `VAULT_ENC_KEY` - generate with: `openssl rand -base64 32 | cut -c1-32`
-- `PG_META_CRYPTO_KEY` - generate with: `openssl rand -hex 32`
-- `SITE_URL`, `API_EXTERNAL_URL`, `SUPABASE_PUBLIC_URL` -your domain/subdomain
-
-**Important:** Keep these keys secure and never commit them to git!
 
 #### Nginx Proxy Manager (optional)
 
@@ -151,7 +131,6 @@ chmod +x start-stack.sh
 │ Select services (Space=select):     │
 │                                     │
 │ [X] n8n                             │
-│ [ ] Supabase (full stack)           │
 │ [X] Nginx Proxy Manager             │
 │ [ ] Cloudflared Tunnel              │
 │ [ ] Portainer                       │
@@ -163,7 +142,6 @@ chmod +x start-stack.sh
 #### Simple mode (without whiptail):
 ```
 Start n8n? [y/N]: y
-Start Supabase (full stack)? [y/N]: n
 Start Nginx Proxy Manager? [y/N]: y
 Start Cloudflared Tunnel? [y/N]: n
 Start Portainer? [y/N]: n
@@ -173,7 +151,6 @@ Start Portainer? [y/N]: n
 
 After startup, access:
 - **n8n**: http://localhost:5678
-- **Supabase Studio**: http://localhost:8000
 - **Nginx Proxy Manager**: http://localhost:81
 
 ## Usage
@@ -192,9 +169,6 @@ Interactive menu will let you choose which services to start.
 # Stop n8n
 cd n8n && docker compose down
 
-# Stop Supabase
-cd supabase && docker compose down
-
 # Stop NPM
 cd proxy/npm && docker compose down
 ```
@@ -204,9 +178,6 @@ cd proxy/npm && docker compose down
 ```bash
 # n8n logs
 docker logs n8n -f
-
-# Supabase DB logs
-docker logs supabase-db -f
 ```
 
 ### Restart a service
@@ -225,48 +196,31 @@ docker compose pull
 
 # Recreate containers
 docker compose up -d
-
-# Same for other services
-cd ../supabase
-docker compose pull
-docker compose up -d
 ```
 
 ## Backup & Restore
 
-### Backup n8n workflows
+The repository includes automated scripts to easily backup and restore your stack.
 
+For detailed instructions, please see the documentation:
+- [Backup Instructions & Migration Guide](docs/BACKUP_INSTRUCTIONS.md)
+- [Restore Instructions](docs/RESTORE_INSTRUCTIONS.md)
+
+### Automated Backup
+
+To create a backup of your selected services:
 ```bash
-# Export all workflows
-docker exec n8n n8n export:workflow --all --output=/backup/workflows-$(date +%Y%m%d).json
-
-# Backup to local machine
-docker cp n8n:/backup ./backups/n8n/
+sudo ./scripts/backup/backup-stack.sh
 ```
+Follow the interactive prompts to select what to backup and optionally create a single `.tar.gz` archive.
 
-### Backup Supabase database
+### Automated Restore
 
+To restore your stack from a backup on a new instance or over existing data:
 ```bash
-# Create backup
-docker exec supabase-db pg_dump -U postgres postgres > backups/supabase/backup-$(date +%Y%m%d).sql
+sudo ./scripts/restore/restore-stack.sh
 ```
-
-### Backup n8n database
-
-```bash
-# Create backup
-docker exec n8n-db pg_dump -U postgres n8n_db > backups/n8n/n8n-db-$(date +%Y%m%d).sql
-```
-
-### Restore database
-
-```bash
-# Restore full database
-docker exec -i supabase-db psql -U postgres postgres < backups/supabase/backup-20260124.sql
-
-# Restore n8n database
-docker exec -i n8n-db psql -U postgres -d n8n_db < backups/n8n/n8n-db-20260124.sql
-```
+The script will automatically find the latest backup in the `backups/` directory and guide you through the process.
 
 ## Troubleshooting
 
@@ -338,8 +292,7 @@ deploy:
 ```
 
 **Run minimal services:**
-- Start only n8n (minimal Supabase will start automatically)
-- Stop unused Supabase services when not needed
+- Start only n8n
 
 ## Architecture
 
@@ -352,15 +305,15 @@ deploy:
           └─────────────┬─────────────┘
                         │
     ┌───────────────────┼───────────────────┐
-    │                   │                   │
-┌───┴───┐          ┌────┴────┐         ┌────┴────┐
-│  n8n  │ :5678    │Supabase │ :8000   │Portainer│
-│       │          │(optional)│         │(optional)│
-│┌─────┐│          │┌───────┐│         └─────────┘
-││n8n- ││          ││  DB   ││
-││db   ││          ││PG:15  ││
-│└─────┘│          │└───────┘│
-└───────┘          └─────────┘
+    │                                       │
+┌───┴───┐                              ┌────┴────┐
+│  n8n  │ :5678                        │Portainer│
+│       │                              │(optional)│
+│┌─────┐│                              └─────────┘
+││n8n- ││
+││db   ││
+│└─────┘│
+└───────┘
 INDEPENDENT         INDEPENDENT
 
         All on: n8n-stack-network
@@ -369,7 +322,6 @@ INDEPENDENT         INDEPENDENT
 ### Component Relationships
 
 - **n8n** uses its own **n8n-db** (PostgreSQL 16)
-- **Supabase** (Optional) is now completely independent
 - **n8n-db** is initialized automatically using `init-data.sh`
 - **NPM** and **Cloudflared** are optional for reverse proxy/SSL
 - All services communicate via `n8n-stack-network` Docker network
@@ -386,10 +338,6 @@ n8n-pg-stack/
 │   ├── init-data.sh            # DB initialization
 │   ├── files/
 │   └── backup/
-├── supabase/                   # Optional Supabase stack
-│   ├── docker-compose.yml
-│   ├── .env.example
-│   └── README.md               # See for full structure
 ├── proxy/
 │   ├── npm/
 │   │   ├── docker-compose.yml
@@ -403,10 +351,8 @@ n8n-pg-stack/
 ├── scripts/
 │   ├── backup/
 │   │   └── backup-stack.sh     # Backup script
-│   ├── restore/
-│   │   └── restore-stack.sh    # Restore script
-│   └── manage/
-│       └── supabase-toggle.sh  # Switch Supabase modes
+│   └── restore/
+│       └── restore-stack.sh    # Restore script
 └── docs/
     ├── BACKUP_INSTRUCTIONS.md
     └── RESTORE_INSTRUCTIONS.md
@@ -415,7 +361,6 @@ n8n-pg-stack/
 ## Resources
 
 - [n8n Documentation](https://docs.n8n.io/)
-- [Supabase Self-Hosting](https://supabase.com/docs/guides/self-hosting)
 - [Nginx Proxy Manager](https://nginxproxymanager.com/)
 - [Cloudflare Tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
 
@@ -444,4 +389,3 @@ MIT
 For issues and questions:
 - Open an issue on GitHub
 - Check [n8n community forum](https://community.n8n.io/)
-- Check [Supabase discussions](https://github.com/supabase/supabase/discussions)

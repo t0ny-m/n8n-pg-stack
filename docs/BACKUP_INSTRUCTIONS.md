@@ -27,12 +27,6 @@ If you prefer to backup manually, here is what you need to save for each service
   - To backup: `docker run --rm -v n8n_data:/volume -v $(pwd):/backup alpine tar -czf /backup/n8n_data.tar.gz -C /volume .`
 - **Logical Backup**: The script automatically creates `n8n_db_dump.sql` by running `pg_dump` against the `n8n-db` container before stopping services.
 
-### Supabase
-- **Location**: `supabase/`
-- **Files**: `.env`, `docker-compose.yml`
-- **Directories**: `volumes/` (Contains database, storage, functions)
-  - To backup: `cp -R supabase/volumes /path/to/backup/`
-
 ### Nginx Proxy Manager (NPM)
 - **Location**: `proxy/npm/`
 - **Directories**: `data/`, `letsencrypt/`
@@ -77,10 +71,6 @@ Copy your backup archive (`n8n_stack_backup_YYYYMMDD_....tar.gz`) to the new ser
      docker volume create n8n_data
      docker run --rm -v n8n_data:/volume -v $(pwd)/temp_restore/n8n:/backup alpine tar -xzf /backup/n8n_data.tar.gz -C /volume
      ```
-
-3. **Restore Supabase**
-   - Copy `.env` and `docker-compose.yml` to `supabase/`.
-   - Copy `volumes` directory to `supabase/volumes`.
 
 4. **Restore NPM**
    - Copy `data` and `letsencrypt` directories to `proxy/npm/`.

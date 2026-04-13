@@ -26,7 +26,6 @@ fi
 
 # Paths
 N8N_DIR="$PROJECT_ROOT/n8n"
-SUPABASE_DIR="$PROJECT_ROOT/supabase"
 NPM_DIR="$PROJECT_ROOT/proxy/npm"
 CLOUDFLARED_DIR="$PROJECT_ROOT/proxy/cloudflared"
 PORTAINER_DIR="$PROJECT_ROOT/portainer"
@@ -390,31 +389,15 @@ check_and_open_ports() {
 get_required_ports() {
     local ports=()
     
-    # Load port values from supabase .env if it exists
-    local KONG_HTTP_PORT=8000
-    local KONG_HTTPS_PORT=8443
-    local POSTGRES_PORT=5432
-    local POOLER_PROXY_PORT_TRANSACTION=6543
-    
-    if [ -f "$SUPABASE_DIR/.env" ]; then
-        source "$SUPABASE_DIR/.env" 2>/dev/null || true
-    fi
-    
     if $START_NPM && ! $START_CLOUDFLARED; then
         # NPM selected - only need 80, 81, 443
         ports=(80 81 443)
     elif $START_CLOUDFLARED; then
         # Cloudflared selected - no ports needed
         ports=()
-    elif $START_SUPABASE && ! $START_NPM; then
-        # Full Supabase without NPM - need all Supabase ports
-        ports=($POSTGRES_PORT $POOLER_PROXY_PORT_TRANSACTION 4000 $KONG_HTTP_PORT $KONG_HTTPS_PORT)
-        if $START_N8N; then
-            ports+=(5678)
-        fi
-    elif $START_N8N && ! $START_SUPABASE && ! $START_NPM; then
-        # n8n only (minimal Supabase) - need n8n + db ports
-        ports=(5678 $POSTGRES_PORT $POOLER_PROXY_PORT_TRANSACTION 4000)
+    elif $START_N8N && ! $START_NPM; then
+        # n8n only - need n8n + db ports
+        ports=(5678 5432)
     fi
     
     # Remove duplicates
@@ -526,7 +509,6 @@ select_services_interactive() {
     # Build checklist
     local options=(
         "n8n" "n8n" OFF
-        "supabase" "Supabase" OFF
         "npm" "Nginx Proxy Manager" OFF
         "cloudflared" "Cloudflared Tunnel" OFF
         "portainer" "Portainer" OFF
@@ -555,7 +537,6 @@ select_services_interactive() {
     
     # Parse selected services
     START_N8N=false
-    START_SUPABASE=false
     START_NPM=false
     START_CLOUDFLARED=false
     START_PORTAINER=false
@@ -564,9 +545,6 @@ select_services_interactive() {
         case $service in
             \"n8n\"|n8n)
                 START_N8N=true
-                ;;
-            \"supabase\"|supabase)
-                START_SUPABASE=true
                 ;;
             \"npm\"|npm)
                 START_NPM=true
@@ -594,12 +572,6 @@ select_services_simple() {
     read -rp "Start n8n? [y/N]: " response
     if [[ "$response" =~ ^[Yy]$ ]]; then
         START_N8N=true
-    fi
-    
-    START_SUPABASE=false
-    read -rp "Start Supabase? [y/N]: " response
-    if [[ "$response" =~ ^[Yy]$ ]]; then
-        START_SUPABASE=true
     fi
     
     START_NPM=false
@@ -653,14 +625,13 @@ main() {
     echo "The following services will be started:"
     echo ""
     $START_N8N && echo "  • n8n (+ Postgres)"
-    $START_SUPABASE && echo "  • Supabase"
     $START_NPM && echo "  • Nginx Proxy Manager"
     $START_CLOUDFLARED && echo "  • Cloudflared Tunnel"
     $START_PORTAINER && echo "  • Portainer"
     echo ""
     
     # Check if nothing selected
-    if ! $START_N8N && ! $START_SUPABASE && ! $START_NPM && ! $START_CLOUDFLARED && ! $START_PORTAINER; then
+    if ! $START_N8N && ! $START_NPM && ! $START_CLOUDFLARED && ! $START_PORTAINER; then
         print_error "No services selected. Exiting."
         exit 0
     fi
@@ -672,20 +643,6 @@ main() {
     fi
     
     # Step 3.5: Pre-pull images sequentially (to avoid IO spike)
-    # Step 3.5: Pre-pull images sequentially (to avoid IO spike)
-    if $START_SUPABASE; then
-        print_header "Image Pre-pull: Supabase"
-        if check_dir "$SUPABASE_DIR"; then
-            cd "$SUPABASE_DIR"
-            print_info "Pre-pulling heavy images one by one..."
-            # Getting only active services and pulling them sequentially
-            for service in $($DOCKER_COMPOSE config --services); do
-                echo -n "Pulling $service... "
-                $DOCKER_COMPOSE pull -q "$service" && echo -e "${GREEN}DONE${NC}" || echo -e "${RED}SKIPPED${NC}"
-            done
-        fi
-    fi
-
     if $START_N8N; then
         print_header "Image Pre-pull: n8n"
         if check_dir "$N8N_DIR"; then
@@ -713,53 +670,6 @@ main() {
     fi
     
     # Step 5: Start services in correct order
-    
-    # 5.1: Supabase (if needed)
-    SUPABASE_STARTED=false
-    
-    if $START_SUPABASE; then
-        # Full Supabase stack - Staggered startup
-        print_header "Starting: Supabase"
-        
-        if check_dir "$SUPABASE_DIR"; then
-            cd "$SUPABASE_DIR"
-            
-            if $RECREATE; then
-                print_info "Stopping existing Supabase full stack (--recreate)..."
-                $DOCKER_COMPOSE down 2>/dev/null || true
-            fi
-            
-            # Phase 1: Infrastructure (Foundation)
-            print_info "Phase 1: Starting foundation (vector, db, kong)..."
-            $DOCKER_COMPOSE up -d vector db
-            wait_for_healthy "supabase-db" 60
-            $DOCKER_COMPOSE up -d kong
-            
-            # Phase 2: Core services (API Layer)
-            print_info "Phase 2: Starting API layer (auth, rest, imgproxy)..."
-            sleep 8
-            $DOCKER_COMPOSE up -d auth rest imgproxy
-            
-            # Phase 3: Utility services (Storage & UI)
-            print_info "Phase 3: Starting utility services (meta, studio, storage)..."
-            sleep 8
-            $DOCKER_COMPOSE up -d meta studio storage
-            
-            # Phase 4: Compute & Realtime
-            print_info "Phase 4: Starting compute & realtime (realtime, supavisor, functions)..."
-            sleep 8
-            $DOCKER_COMPOSE up -d realtime supavisor functions
-            
-            # Phase 5: Everything else
-            print_info "Phase 5: Starting remaining services..."
-            sleep 5
-            $DOCKER_COMPOSE up -d
-            
-            print_success "Supabase started successfully"
-            echo ""
-            SUPABASE_STARTED=true
-        fi
-    fi
     
     # 5.2: n8n (Independent)
     if $START_N8N; then
@@ -790,7 +700,7 @@ main() {
     print_header "Startup Complete"
     echo "Running containers:"
     echo ""
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "n8n|supabase|npm|cloudflared|portainer" || print_info "No containers found"
+    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "n8n|npm|cloudflared|portainer" || print_info "No containers found"
     echo ""
     print_success "All selected services started successfully!"
     echo ""

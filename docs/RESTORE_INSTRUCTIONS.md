@@ -38,7 +38,6 @@ sudo ./scripts/restore/restore-stack.sh
    - The script will stop the relevant services.
    - Files (`.env`, config files) are copied to their respective locations.
    - Data volumes (for n8n and Portainer) are restored using a temporary helper container.
-   - Supabase `volumes` directory is replaced.
    - NPM data is replaced.
 
 5. **Restart**: The script offers to restart the stack when finished.
