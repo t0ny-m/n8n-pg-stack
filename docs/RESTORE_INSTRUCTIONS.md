@@ -19,8 +19,14 @@ The stack includes a restore script that simplifies the process by automatically
 2. Run the restore script:
 
 ```bash
-sudo ./scripts/restore/restore-stack.sh
+./scripts/restore/restore-stack.sh
 ```
+
+Run the restore script as your normal user whenever possible.
+
+- On macOS with Docker Desktop or OrbStack, avoid `sudo` by default.
+- Restoring bind-mounted directories as `root` can leave `proxy/npm/data` and `proxy/npm/letsencrypt` owned by `root`, which causes Nginx Proxy Manager to fail with `Permission denied`.
+- The restore script now normalizes ownership for bind-mounted directories, but running it as your regular user is still the safest default.
 
 ### How it Works
 
@@ -38,7 +44,8 @@ sudo ./scripts/restore/restore-stack.sh
    - The script will stop the relevant services.
    - Files (`.env`, config files) are copied to their respective locations.
    - Data volumes (for n8n and Portainer) are restored using a temporary helper container.
-   - NPM data is replaced.
+   - NPM data is replaced with symlink-preserving copy logic so Let's Encrypt files remain valid.
+   - Bind-mounted directories are re-owned to the invoking user after restore.
 
 5. **Restart**: The script offers to restart the stack when finished.
 
@@ -49,4 +56,5 @@ If you cannot use the script, you can restore manually. See the "Migration Guide
 ### Troubleshooting
 
 - **Volume in use error**: If the script fails to remove a volume, ensure all containers using it are stopped. `docker ps` to check running containers.
-- **Permission denied**: Ensure you are running the script with sufficient permissions (user in `docker` group or check file ownership).
+- **Permission denied in NPM after restore**: Check ownership of `proxy/npm/data` and `proxy/npm/letsencrypt`. On macOS they must be writable by your normal user, not just by `root`.
+- **Broken HTTPS certs in NPM**: Verify that `letsencrypt/live/*` symlinks and `letsencrypt/archive/*/privkey*.pem` were restored together. Restoring only `live/` is not enough.

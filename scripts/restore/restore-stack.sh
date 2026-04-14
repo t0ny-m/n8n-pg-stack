@@ -57,6 +57,10 @@ LATEST_N8N_BACKUP=""
 LATEST_NPM_BACKUP=""
 LATEST_CLOUDFLARED_BACKUP=""
 LATEST_PORTAINER_BACKUP=""
+ARCHIVE_HAS_N8N=false
+ARCHIVE_HAS_NPM=false
+ARCHIVE_HAS_CLOUDFLARED=false
+ARCHIVE_HAS_PORTAINER=false
 
 # ============================================================================
 # Helper Functions
@@ -98,6 +102,58 @@ check_dependencies() {
     fi
 }
 
+get_target_owner_user() {
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        echo "$SUDO_USER"
+    else
+        id -un
+    fi
+}
+
+get_target_owner_group() {
+    local owner_user
+    owner_user=$(get_target_owner_user)
+
+    id -gn "$owner_user" 2>/dev/null || id -gn
+}
+
+copy_dir_preserve_links() {
+    local src_dir=$1
+    local dest_dir=$2
+
+    [ -d "$src_dir" ] || return 0
+
+    mkdir -p "$dest_dir"
+
+    (
+        cd "$src_dir"
+        tar -cf - .
+    ) | (
+        cd "$dest_dir"
+        tar -xf -
+    )
+}
+
+normalize_bind_mount_permissions() {
+    local target_dir=$1
+    local owner_user
+    local owner_group
+
+    [ -d "$target_dir" ] || return 0
+
+    owner_user=$(get_target_owner_user)
+    owner_group=$(get_target_owner_group)
+
+    chown -R "$owner_user:$owner_group" "$target_dir" 2>/dev/null || true
+    chmod -R u+rwX "$target_dir"
+
+    if command -v xattr &>/dev/null; then
+        xattr -rc "$target_dir" 2>/dev/null || true
+    fi
+
+    chmod -RN "$target_dir" 2>/dev/null || true
+}
+
 # ============================================================================
 # Discovery Logic
 # ============================================================================
@@ -113,6 +169,15 @@ find_latest_backup_in_dir() {
     # filter for directories that look like backups, e.g., *_backup_*
     local latest=$(ls -dt "$service_dir"/*_backup_* 2>/dev/null | head -n 1)
     echo "$latest"
+}
+
+archive_contains_service() {
+    local archive_file="$1"
+    local service="$2"
+
+    [ -f "$archive_file" ] || return 1
+
+    tar -tzf "$archive_file" 2>/dev/null | grep -Eq "^${service}/[^/]+_backup_[^/]+/"
 }
 
 find_backups() {
@@ -143,6 +208,12 @@ find_backups() {
         else # BSD/Mac
              archive_ts=$(stat -f %m "$LATEST_ARCHIVE")
         fi
+
+        archive_contains_service "$LATEST_ARCHIVE" "n8n" && ARCHIVE_HAS_N8N=true
+        archive_contains_service "$LATEST_ARCHIVE" "npm" && ARCHIVE_HAS_NPM=true
+        archive_contains_service "$LATEST_ARCHIVE" "cloudflared" && ARCHIVE_HAS_CLOUDFLARED=true
+        archive_contains_service "$LATEST_ARCHIVE" "portainer" && ARCHIVE_HAS_PORTAINER=true
+
         print_info "Found archive: $(basename "$LATEST_ARCHIVE")"
     fi
 
@@ -206,26 +277,29 @@ select_services() {
     
     # Helper to check availability
     is_available() {
-        if [ "$SOURCE_TYPE" = "archive" ]; then return 0; fi # Assume archive has everything or we can't easily peek without extracting
+        if [ "$SOURCE_TYPE" = "archive" ]; then
+            [ "$2" = "true" ]
+            return
+        fi
         if [ -n "$1" ]; then return 0; else return 1; fi
     }
     
-    if is_available "$LATEST_N8N_BACKUP"; then
+    if is_available "$LATEST_N8N_BACKUP" "$ARCHIVE_HAS_N8N"; then
         options+=("n8n" "n8n" OFF)
         available_count=$((available_count+1))
     fi
     
-    if is_available "$LATEST_NPM_BACKUP"; then
+    if is_available "$LATEST_NPM_BACKUP" "$ARCHIVE_HAS_NPM"; then
         options+=("npm" "Nginx Proxy Manager" OFF)
         available_count=$((available_count+1))
     fi
     
-    if is_available "$LATEST_CLOUDFLARED_BACKUP"; then
+    if is_available "$LATEST_CLOUDFLARED_BACKUP" "$ARCHIVE_HAS_CLOUDFLARED"; then
         options+=("cloudflared" "Cloudflared Tunnel" OFF)
         available_count=$((available_count+1))
     fi
     
-    if is_available "$LATEST_PORTAINER_BACKUP"; then
+    if is_available "$LATEST_PORTAINER_BACKUP" "$ARCHIVE_HAS_PORTAINER"; then
         options+=("portainer" "Portainer" OFF)
         available_count=$((available_count+1))
     fi
@@ -246,10 +320,10 @@ select_services() {
         # Fallback to simple read
         print_info "Interactive menu missing. Please select manually."
         selected=""
-        if is_available "$LATEST_N8N_BACKUP"; then read -p "Restore n8n? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected n8n"; fi
-        if is_available "$LATEST_NPM_BACKUP"; then read -p "Restore NPM? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected npm"; fi
-        if is_available "$LATEST_CLOUDFLARED_BACKUP"; then read -p "Restore Cloudflared? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected cloudflared"; fi
-        if is_available "$LATEST_PORTAINER_BACKUP"; then read -p "Restore Portainer? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected portainer"; fi
+        if is_available "$LATEST_N8N_BACKUP" "$ARCHIVE_HAS_N8N"; then read -p "Restore n8n? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected n8n"; fi
+        if is_available "$LATEST_NPM_BACKUP" "$ARCHIVE_HAS_NPM"; then read -p "Restore NPM? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected npm"; fi
+        if is_available "$LATEST_CLOUDFLARED_BACKUP" "$ARCHIVE_HAS_CLOUDFLARED"; then read -p "Restore Cloudflared? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected cloudflared"; fi
+        if is_available "$LATEST_PORTAINER_BACKUP" "$ARCHIVE_HAS_PORTAINER"; then read -p "Restore Portainer? [y/N] " r; [[ "$r" =~ ^[Yy] ]] && selected="$selected portainer"; fi
     fi
     
     if [ $? -ne 0 ] && [ -n "$cmd" ]; then
@@ -368,7 +442,11 @@ restore_n8n_db_dump() {
     # Drop and create DB (WARNING: destructive)
     # Since we are restoring full DB dump probably
     
-    if docker exec -i "$db_container" psql -U "$db_user" -d postgres -c "DROP DATABASE IF EXISTS \"$db_name\"; CREATE DATABASE \"$db_name\";" >/dev/null; then
+    docker exec -i "$db_container" psql -U "$db_user" -d postgres -c \
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$db_name' AND pid <> pg_backend_pid();" >/dev/null 2>&1 || true
+
+    if docker exec -i "$db_container" psql -U "$db_user" -d postgres -c "DROP DATABASE IF EXISTS \"$db_name\";" >/dev/null &&
+       docker exec -i "$db_container" psql -U "$db_user" -d postgres -c "CREATE DATABASE \"$db_name\";" >/dev/null; then
          # Restore data
          if docker exec -i "$db_container" psql -U "$db_user" -d "$db_name" < "$dump_file" >/dev/null; then
              print_success "Logical backup restored successfully."
@@ -390,15 +468,20 @@ restore_n8n() {
     print_header "Restoring n8n"
     
     if [ ! -d "$src_path" ]; then print_error "Source not found: $src_path"; return; fi
+    mkdir -p "$N8N_DIR"
     
     # Configs
     print_info "Restoring files..."
-    cp -r "$src_path/.env" "$N8N_DIR/.env"
-    mkdir -p "$N8N_DIR"
+    if [ -f "$src_path/.env" ]; then
+        cp -r "$src_path/.env" "$N8N_DIR/.env"
+    else
+        print_warning "n8n .env not found in backup, keeping existing file if present."
+    fi
     if [ -d "$src_path/files" ]; then
         print_info "Restoring files directory..."
         rm -rf "$N8N_DIR/files"
-        cp -R "$src_path/files" "$N8N_DIR/"
+        copy_dir_preserve_links "$src_path/files" "$N8N_DIR/files"
+        normalize_bind_mount_permissions "$N8N_DIR/files"
     fi
     
     # Volume
@@ -444,17 +527,21 @@ restore_n8n() {
 restore_npm() {
     local src_path="$1"
     print_header "Restoring NPM"
+
+    mkdir -p "$NPM_DIR"
     
     if [ -d "$src_path/data" ]; then
         print_info "Restoring data..."
         rm -rf "$NPM_DIR/data"
-        cp -R "$src_path/data" "$NPM_DIR/"
+        copy_dir_preserve_links "$src_path/data" "$NPM_DIR/data"
+        normalize_bind_mount_permissions "$NPM_DIR/data"
     fi
     
     if [ -d "$src_path/letsencrypt" ]; then
         print_info "Restoring certificates..."
         rm -rf "$NPM_DIR/letsencrypt"
-        cp -R "$src_path/letsencrypt" "$NPM_DIR/"
+        copy_dir_preserve_links "$src_path/letsencrypt" "$NPM_DIR/letsencrypt"
+        normalize_bind_mount_permissions "$NPM_DIR/letsencrypt"
     fi
     print_success "NPM restored"
 }
@@ -464,7 +551,11 @@ restore_cloudflared() {
     print_header "Restoring Cloudflared"
     
     print_info "Restoring .env..."
-    cp "$src_path/.env" "$CLOUDFLARED_DIR/.env"
+    if [ -f "$src_path/.env" ]; then
+        cp "$src_path/.env" "$CLOUDFLARED_DIR/.env"
+    else
+        print_warning "Cloudflared .env not found in backup, keeping existing file if present."
+    fi
     print_success "Cloudflared restored"
 }
 

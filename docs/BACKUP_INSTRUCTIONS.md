@@ -7,8 +7,14 @@ This guide explains how to back up your n8n-stack and migrate it to a new instan
 The easiest way to backup is using the included script.
 
 ```bash
-sudo ./scripts/backup/backup-stack.sh
+./scripts/backup/backup-stack.sh
 ```
+
+Run the backup script as your normal user whenever possible.
+
+- On macOS with Docker Desktop or OrbStack, do not use `sudo` for backup/restore unless you have a very specific reason.
+- Running restore as `root` can leave bind-mounted directories such as `proxy/npm/data` and `proxy/npm/letsencrypt` owned by `root`, which breaks Nginx Proxy Manager on macOS.
+- On Linux, if your user is not in the `docker` group, either fix Docker permissions first or be aware that `sudo` changes file ownership semantics.
 
 - Select the services you want to backup.
 - Choose whether to stop services (recommended for database consistency).
@@ -30,6 +36,14 @@ If you prefer to backup manually, here is what you need to save for each service
 ### Nginx Proxy Manager (NPM)
 - **Location**: `proxy/npm/`
 - **Directories**: `data/`, `letsencrypt/`
+- **Important**: Backup and restore must preserve symlinks inside `letsencrypt/live/` and the matching private keys inside `letsencrypt/archive/`.
+- **Safe manual backup**:
+  ```bash
+  cd proxy/npm
+  docker compose stop npm
+  tar -czpf npm_backup_$(date +%F_%H-%M).tar.gz data letsencrypt
+  docker compose start npm
+  ```
 
 ### Cloudflared
 - **Location**: `proxy/cloudflared/`
@@ -73,7 +87,23 @@ Copy your backup archive (`n8n_stack_backup_YYYYMMDD_....tar.gz`) to the new ser
      ```
 
 4. **Restore NPM**
-   - Copy `data` and `letsencrypt` directories to `proxy/npm/`.
+   - Stop `npm` first.
+   - Restore `data` and `letsencrypt` with a method that preserves symlinks:
+     ```bash
+     cd proxy/npm
+     docker compose down
+     rm -rf data letsencrypt
+     mkdir -p data letsencrypt
+     tar -cpf - -C ../../temp_restore/npm/npm_backup_.../data . | tar -xpf - -C data
+     tar -cpf - -C ../../temp_restore/npm/npm_backup_.../letsencrypt . | tar -xpf - -C letsencrypt
+     ```
+   - On macOS, make sure the restored directories are owned by your normal user:
+     ```bash
+     chown -R "$(id -un):$(id -gn)" data letsencrypt
+     chmod -R u+rwX data letsencrypt
+     xattr -rc data letsencrypt 2>/dev/null || true
+     chmod -RN data letsencrypt 2>/dev/null || true
+     ```
 
 5. **Restore Cloudflared**
    - Copy `.env` to `proxy/cloudflared/`.

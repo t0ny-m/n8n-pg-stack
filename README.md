@@ -210,7 +210,7 @@ For detailed instructions, please see the documentation:
 
 To create a backup of your selected services:
 ```bash
-sudo ./scripts/backup/backup-stack.sh
+./scripts/backup/backup-stack.sh
 ```
 Follow the interactive prompts to select what to backup and optionally create a single `.tar.gz` archive.
 
@@ -218,7 +218,7 @@ Follow the interactive prompts to select what to backup and optionally create a 
 
 To restore your stack from a backup on a new instance or over existing data:
 ```bash
-sudo ./scripts/restore/restore-stack.sh
+./scripts/restore/restore-stack.sh
 ```
 The script will automatically find the latest backup in the `backups/` directory and guide you through the process.
 

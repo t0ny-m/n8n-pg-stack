@@ -87,6 +87,52 @@ check_dependencies() {
     fi
 }
 
+get_target_owner_user() {
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        echo "$SUDO_USER"
+    else
+        id -un
+    fi
+}
+
+get_target_owner_group() {
+    local owner_user
+    owner_user=$(get_target_owner_user)
+
+    id -gn "$owner_user" 2>/dev/null || id -gn
+}
+
+normalize_backup_permissions() {
+    local target_path=$1
+    local owner_user
+    local owner_group
+
+    [ -e "$target_path" ] || return 0
+
+    owner_user=$(get_target_owner_user)
+    owner_group=$(get_target_owner_group)
+
+    chown -R "$owner_user:$owner_group" "$target_path" 2>/dev/null || true
+    chmod -R u+rwX "$target_path" 2>/dev/null || true
+}
+
+copy_dir_preserve_links() {
+    local src_dir=$1
+    local dest_dir=$2
+
+    [ -d "$src_dir" ] || return 0
+
+    mkdir -p "$dest_dir"
+
+    (
+        cd "$src_dir"
+        tar -cf - .
+    ) | (
+        cd "$dest_dir"
+        tar -xf -
+    )
+}
+
 # ============================================================================
 # Service Selection
 # ============================================================================
@@ -209,8 +255,8 @@ backup_n8n() {
         cp -r "$N8N_DIR/.env" "$full_path/.env" 2>/dev/null || true
         
         if [ -d "$N8N_DIR/files" ]; then
-             mkdir -p "$full_path/files"
-             cp -r "$N8N_DIR/files/"* "$full_path/files/" 2>/dev/null || true
+             print_info "Copying n8n files directory..."
+             copy_dir_preserve_links "$N8N_DIR/files" "$full_path/files"
         fi
         
     # Volume n8n_data (files)
@@ -219,6 +265,7 @@ backup_n8n() {
         # Volume db_storage (postgres data)
         backup_named_volume "n8n_db_storage" "$full_path/n8n_db_storage.tar.gz"
         
+        normalize_backup_permissions "$full_path"
         CREATED_BACKUPS+=("$service_path")
         print_success "n8n backup created at: backups/$service_path"
     else
@@ -239,12 +286,13 @@ backup_npm() {
         print_info "Copying data and certificates..."
         # NPM uses bind mounts for data and letsencrypt
         if [ -d "$NPM_DIR/data" ]; then
-             cp -R "$NPM_DIR/data" "$full_path/"
+             copy_dir_preserve_links "$NPM_DIR/data" "$full_path/data"
         fi
         if [ -d "$NPM_DIR/letsencrypt" ]; then
-             cp -R "$NPM_DIR/letsencrypt" "$full_path/"
+             copy_dir_preserve_links "$NPM_DIR/letsencrypt" "$full_path/letsencrypt"
         fi
         
+        normalize_backup_permissions "$full_path"
         CREATED_BACKUPS+=("$service_path")
         print_success "NPM backup created at: backups/$service_path"
     else
@@ -264,6 +312,7 @@ backup_cloudflared() {
         print_info "Copying configuration..."
         cp "$CLOUDFLARED_DIR/.env" "$full_path/.env" 2>/dev/null || true
         
+        normalize_backup_permissions "$full_path"
         CREATED_BACKUPS+=("$service_path")
         print_success "Cloudflared backup created at: backups/$service_path"
     else
@@ -282,6 +331,7 @@ backup_portainer() {
     # Volume portainer_data
     backup_named_volume "portainer_data" "$full_path/portainer_data.tar.gz"
     
+    normalize_backup_permissions "$full_path"
     CREATED_BACKUPS+=("$service_path")
     print_success "Portainer backup created at: backups/$service_path"
 }
@@ -401,7 +451,7 @@ main() {
                 if docker ps --filter "name=^npm$" --filter "status=running" --format "{{.Names}}" | grep -q "npm"; then
                     NPM_RUNNING="true"
                     print_info "Stopping NPM..."
-                    docker compose down 2>/dev/null || true
+                    cd "$NPM_DIR" && docker compose down 2>/dev/null || true
                 fi
             fi
         fi
@@ -411,7 +461,7 @@ main() {
                 if docker ps --filter "name=^cloudflared-tunnel$" --filter "status=running" --format "{{.Names}}" | grep -q "cloudflared-tunnel"; then
                     CLOUDFLARED_RUNNING="true"
                     print_info "Stopping Cloudflared..."
-                    docker compose down 2>/dev/null || true
+                    cd "$CLOUDFLARED_DIR" && docker compose down 2>/dev/null || true
                 fi
             fi
         fi
@@ -422,7 +472,7 @@ main() {
                  if docker ps --filter "name=^portainer$" --filter "status=running" --format "{{.Names}}" | grep -q "portainer"; then
                      PORTAINER_RUNNING="true"
                      print_info "Stopping Portainer..."
-                     docker compose down 2>/dev/null || true
+                     cd "$PORTAINER_DIR" && docker compose down 2>/dev/null || true
                  fi
              fi
         fi
@@ -486,6 +536,7 @@ main() {
             tar -czf "$ARCHIVE_NAME" "${CREATED_BACKUPS[@]}"
             
             if [ $? -eq 0 ]; then
+                normalize_backup_permissions "$ARCHIVE_FILE"
                 print_success "Archive created: backups/$ARCHIVE_NAME"
                 echo "Size: $(du -h "$ARCHIVE_NAME" | cut -f1)"
             else
