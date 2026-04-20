@@ -1,6 +1,8 @@
 volumes:
   db_storage:
+    name: n8n_db_storage   # explicit name — not affected by compose project prefix
   n8n_data:
+    name: n8n_data     # explicit name — not affected by compose project prefix
 
 
 networks:
