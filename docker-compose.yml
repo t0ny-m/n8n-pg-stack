@@ -1,0 +1,12 @@
+name: n8n-stack
+
+include:
+  - path: ./proxy/npm/docker-compose.yml
+  - path: ./proxy/cloudflared/docker-compose.yml
+  - path: ./n8n/docker-compose.yml
+  - path: ./portainer/docker-compose.yml
+
+networks:
+  default:
+    name: n8n-stack-network
+    external: true

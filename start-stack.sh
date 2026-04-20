@@ -4,7 +4,7 @@ set -e
 
 # ============================================================================
 # Stack Startup Script
-# Starts selected services from n8n-stack
+# Starts selected services from n8n-stack via the root docker-compose.yml
 # ============================================================================
 
 # Colors for output
@@ -25,10 +25,8 @@ else
 fi
 
 # Paths
-N8N_DIR="$PROJECT_ROOT/n8n"
-NPM_DIR="$PROJECT_ROOT/proxy/npm"
-CLOUDFLARED_DIR="$PROJECT_ROOT/proxy/cloudflared"
-PORTAINER_DIR="$PROJECT_ROOT/portainer"
+N8N_DIR="$PROJECT_ROOT/n8n"            # still used for .env pre-load
+COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 NETWORK_NAME="n8n-stack-network"
 
 # Docker compose command (will be set by check_docker)
@@ -444,49 +442,51 @@ wait_for_healthy() {
     return 1
 }
 
-# Check if directory exists
-check_dir() {
-    if [ ! -d "$1" ]; then
-        print_error "Directory not found: $1"
-        return 1
-    fi
-    return 0
+# Generate the root compose file based on selected services
+generate_compose_file() {
+    print_header "Generating Compose File"
+    print_info "Updating $COMPOSE_FILE based on selection..."
+    
+    cat > "$COMPOSE_FILE" << EOF
+name: n8n-stack
+
+include:
+EOF
+
+    $START_NPM && echo "  - path: ./proxy/npm/docker-compose.yml" >> "$COMPOSE_FILE"
+    $START_CLOUDFLARED && echo "  - path: ./proxy/cloudflared/docker-compose.yml" >> "$COMPOSE_FILE"
+    $START_N8N && echo "  - path: ./n8n/docker-compose.yml" >> "$COMPOSE_FILE"
+    $START_PORTAINER && echo "  - path: ./portainer/docker-compose.yml" >> "$COMPOSE_FILE"
+
+    cat >> "$COMPOSE_FILE" << EOF
+
+networks:
+  default:
+    name: n8n-stack-network
+    external: true
+EOF
+
+    print_success "Compose file updated"
 }
 
-# Start service with recreation logic
-start_service() {
-    local service_name=$1
-    local service_dir=$2
-    local description=$3
-    local wait_healthy=$4  # Optional: container name to wait for
-    local extra_args=$5    # Optional: extra args for docker compose up
+# Start all included services via the root compose file
+start_stack() {
+    print_header "Starting Services"
+    print_info "Compose file: $COMPOSE_FILE"
+    echo ""
     
-    print_header "Starting: $description"
+    cd "$PROJECT_ROOT"
     
-    if ! check_dir "$service_dir"; then
-        print_error "Skipping $service_name (directory not found)"
-        return 1
-    fi
-    
-    print_info "Working directory: $service_dir"
-    cd "$service_dir"
-    
-    # Recreate containers only if requested
+    local up_args=""
     if $RECREATE; then
-        print_info "Stopping existing containers (--recreate flag is set)..."
-        $DOCKER_COMPOSE down 2>/dev/null || true
+        print_info "--recreate flag set: will force-recreate containers"
+        up_args="--force-recreate"
     fi
     
     print_info "Starting containers..."
-    # --no-recreate is implied by default for existing non-changed containers
-    $DOCKER_COMPOSE up -d $extra_args
+    $DOCKER_COMPOSE -f "$COMPOSE_FILE" up -d $up_args
     
-    # Wait for health check if specified
-    if [ -n "$wait_healthy" ]; then
-        wait_for_healthy "$wait_healthy" 60
-    fi
-    
-    print_success "$description started successfully"
+    print_success "Services started successfully"
     echo ""
 }
 
@@ -642,23 +642,20 @@ main() {
         exit 0
     fi
     
-    # Step 3.5: Pre-pull images sequentially (to avoid IO spike)
-    if $START_N8N; then
-        print_header "Image Pre-pull: n8n"
-        if check_dir "$N8N_DIR"; then
-            cd "$N8N_DIR"
-            if [ -f ".env" ]; then
-                set -a
-                source .env
-                set +a
-                print_info "Pre-pulling n8n images..."
-                $DOCKER_COMPOSE pull -q
-            else
-                print_warning "n8n/.env file not found! Skipping pre-pull."
-            fi
-        fi
+    # Step 3.5: Generate compose file
+    generate_compose_file
+
+    # Step 3.6: Pre-pull images (from root compose, it will only pull included services)
+    print_header "Image Pre-pull"
+    print_info "Pre-pulling images for selected services..."
+    # Load n8n env so compose can resolve variables during pull
+    if [ -f "$N8N_DIR/.env" ]; then
+        set -a; source "$N8N_DIR/.env"; set +a
     fi
-    
+    cd "$PROJECT_ROOT"
+    $DOCKER_COMPOSE -f "$COMPOSE_FILE" pull -q 2>/dev/null || \
+        print_warning "Pre-pull failed or partially skipped (images may already be cached)"
+
     # Step 4: Check ports and firewall
     REQUIRED_PORTS=$(get_required_ports)
     if [ -n "$REQUIRED_PORTS" ]; then
@@ -668,41 +665,24 @@ main() {
     else
         print_info "Using Cloudflared Tunnel - no port check needed"
     fi
-    
-    # Step 5: Start services in correct order
-    
-    # 5.2: n8n (Independent)
-    if $START_N8N; then
-        # Ensure env is loaded for this context if not already
-        if [ -d "$N8N_DIR" ] && [ -f "$N8N_DIR/.env" ]; then
-             set -a; source "$N8N_DIR/.env"; set +a
-        fi
-        start_service "n8n" "$N8N_DIR" "n8n"
-    fi
-    
-    # 5.3: Independent services (with small delays to reduce IO spike)
-    if $START_NPM; then
-        sleep 2
-        start_service "npm" "$NPM_DIR" "Nginx Proxy Manager"
+
+    # Step 5: Load n8n env vars so compose can resolve them, then start everything
+    if [ -f "$N8N_DIR/.env" ]; then
+        set -a; source "$N8N_DIR/.env"; set +a
     fi
 
-    if $START_CLOUDFLARED; then
-        sleep 2
-        start_service "cloudflared" "$CLOUDFLARED_DIR" "Cloudflared Tunnel"
-    fi
-
-    if $START_PORTAINER; then
-        sleep 2
-        start_service "portainer" "$PORTAINER_DIR" "Portainer"
-    fi
+    start_stack
 
     # Final summary
     print_header "Startup Complete"
-    echo "Running containers:"
+    echo "Running containers (n8n-stack):"
     echo ""
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "n8n|npm|cloudflared|portainer" || print_info "No containers found"
+    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" \
+        | grep -E "(n8n|npm|cloudflared|portainer)" \
+        || print_info "No containers found"
     echo ""
     print_success "All selected services started successfully!"
+    print_info "Tip: Stop the full stack any time with:  docker compose -f $COMPOSE_FILE down"
     echo ""
 }
 
